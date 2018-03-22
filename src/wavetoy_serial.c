@@ -36,7 +36,7 @@ int main(){
     ucur = malloc(gnx*sizeof(double*));
     unew = malloc(gnx*sizeof(double*));
 
-    for (i=0; i<=gny; i++){
+    for (i=0; i<=gnx; i++){
         uold[i] = malloc(gny*sizeof(double*));
         ucur[i] = malloc(gny*sizeof(double*));
         unew[i] = malloc(gny*sizeof(double*));
