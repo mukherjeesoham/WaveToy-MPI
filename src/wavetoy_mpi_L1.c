@@ -3,7 +3,7 @@
 /* MPI implementation where each MPI procress does the 
  * same thing. Introduce communication
  * where the domain is split horizontally to allow for 
- * contigous data being sent.                                 */
+ * contigous data being sent. Only works for nprocs = 2       */
 /* Soham 3/2018                                               */
 /*============================================================*/
 
@@ -19,12 +19,13 @@
 int main(int argc, char *argv[]){
     int **uold, **unew, **ucur;
     int **uold1D, **unew1D, **ucur1D;
-    int gnx, gny, nprocs, worker;
+    int nprocs, worker;
     int i, j, k;
     double c, csq, x, y, u, dudt, dx, dy, dt, dtdx, dtdxsq;
     MPI_Status status;
     int nxprocs, nyprocs, nxnom, nynom;
     int gixs, gixe, giys, giye, ixs, ixe, iys, iye, ixem, iyem, gnx, gny, gnxgny;
+    int li, lj;
 
     // Initialize MPI
     MPI_Init(&argc, &argv);
@@ -42,7 +43,7 @@ int main(int argc, char *argv[]){
 
     // global starting and ending indices (withtout ghost zones)
     gixs = (worker*nxnom) + 1;  // starting index for $worker along x 
-    gixe = gix1 + nxnom - 1;    // ending index for $worker along x
+    gixe = gixs + nxnom - 1;    // ending index for $worker along x
     giys = 1;                   // starting index for $worker along y
     giye = ny;                  // ending index for $worker along y
 
@@ -72,12 +73,12 @@ int main(int argc, char *argv[]){
     // This step is quite interesting. It looks 
     // complicated, but all it does is allow for contigous 
     // memory storage.
-    uold1D = malloc(gnxgny*sizeof(double*));
-    ucur1D = malloc(gnxgny*sizeof(double*));
-    unew1D = malloc(gnxgny*sizeof(double*));
-    uold   = malloc(gnx*sizeof(double*));
-    ucur   = malloc(gnx*sizeof(double*));
-    unew   = malloc(gnx*sizeof(double*));
+    uold1D = malloc(gnxgny*sizeof(int*));
+    ucur1D = malloc(gnxgny*sizeof(int*));
+    unew1D = malloc(gnxgny*sizeof(int*));
+    uold   = malloc(gnx*sizeof(int*));
+    ucur   = malloc(gnx*sizeof(int*));
+    unew   = malloc(gnx*sizeof(int*));
     
     for (i=0; i<=gnx; i++){
         uold[i] = &uold1D[i*gny];
@@ -100,119 +101,126 @@ int main(int argc, char *argv[]){
             }
         }
     }
-
-    // Initialize ucur [Needs communication]
-    // First, transfer data to ghost cells 
-    for (i=0, i<gnx, i++){             // left and right columns
-        uold[i][0]   = 0.0;
-        uold[i][iye] = 0.0;
-    }
-
-    // XXX: I don't think this should be here.
-    uold[0][0]   = 0.0;            // TL corner
-    uold[0][iye] = 0.0;            // TR corner
-    uold[ixe][0] = 0.0;            // BL corner
-    uold[ixe][iye] = 0.0;          // BR corner
     
-    if (nprocs==1){                // if there's only one process 
-        for (j=1, j<gny, j++){
-            uold[0][j]   = uold[ixem][j];  // ghostzone of lower block
-            uold[ixe][j] = uold[1][j];     // ghostzone of upper block 
-            
-        }
+   // Initialize ucur 
+   // For this, only the inner boundaries need to be exchanged.
+   if (worker==0){     // Currently works for only two processes 
+       MPI_Send(&uold[ixem][0], ny, MPI_DOUBLE, 1, 0, MPI_COMM_WORLD);
+       MPI_Recv(&uold[ixe][0],  ny, MPI_DOUBLE, 1, 1, MPI_COMM_WORLD, &status);
+   } else{            
+       MPI_Send(&uold[1][0], ny, MPI_DOUBLE, 0, 1, MPI_COMM_WORLD);
+       MPI_Recv(&uold[0][0], ny, MPI_DOUBLE, 0, 0, MPI_COMM_WORLD, &status);
+   }
+   
+   for (i=1; i<=nxnom; i++){
+       for (j=1; j<=nynom; j++){   
+           dudt = 0.0; 
+           ucur[i][j] = uold[i][j] - 2.0*dt*dudt 
+                    + 0.5*csq*dtdxsq*(uold[i+1][j] - 2.0*uold[i][j] + uold[i-1][j]
+                                    + uold[i][j+1] - 2.0*uold[i][j] + uold[i][j-1]);    
+       }
+   }
+   
+   printf("Jetzt geht's los!\n");
+   // update solution to next step for n steps
+   for (k=0; k<=nsteps; k++){
+      if (worker == 0){
+          // Impose Dirichlet BCs on the corners
+          uold[0][0]    = 0.0;
+          ucur[0][0]    = 0.0;
+          uold[0][ny+1] = 0.0;
+          ucur[0][ny+1] = 0.0;
+          uold[nxnom+1][0] = 0.0;
+          ucur[nxnom+1][0] = 0.0;
+          uold[nxnom+1][ny+1] = 0.0;
+          ucur[nynom+1][ny+1] = 0.0;
 
-    } else{
-        if (worker==0){
-            
-        } else{
+          // Impose Dirichlet BCs on the top
+          for (j=1; j<=ny; j++){
+              uold[0][j] = 0.0;
+              ucur[0][j] = 0.0;
+          }
 
-        
-        }
-    }
+          // Impose Dirichlet BCs on the left
+          for (i=1; i<=nxnom; i++){
+              uold[i][0] = 0.0;
+              ucur[i][0] = 0.0;
+          }
 
-    for (i=1; i<=nx; i++){
-        for (j=1; j<=ny; j++){
-            dudt = 0.0                                      // IC: moment of time symmetry dudt = 0 
-                
-            ucur[i][j] = uold[i][j] - 2.0*dt*dudt 
-                         + 0.5*csq*dtdxsq*(uold[i+1][j] - 2.0*uold[i][j] + uold[i-1][j]
-                                         + uold[i][j+1] - 2.0*uold[i][j] + uold[i][j-1]);    
-        }
-    }
+          // Impose Dirichlet BCs on the right
+          for (i=1; i<=nxnom; i++){
+              uold[i][ny+1] = 0.0;
+              ucur[i][ny+1] = 0.0;
+          }
+          
+      } else{
+          // Impose Dirichlet BCs on the corners
+          uold[nxnom+1][0] = 0.0;
+          ucur[nxnom+1][0] = 0.0;
+          uold[nxnom+1][ny+1] = 0.0;
+          ucur[nxnom+1][ny+1] = 0.0;
+          uold[0][0] = 0.0;
+          ucur[0][0] = 0.0;
+          uold[0][ny+1] = 0.0;
+          ucur[0][ny+1] = 0.0;
 
-    printf("Jetzt geht's los!\n");
+          // Impose Dirichlet BCs on the bottom
+          for (j=1; j<=ny; j++){
+              uold[nxnom+1][j] = 0.0;
+              ucur[nxnom+1][j] = 0.0;
+          }
+          
+          // Impose Dirichlet BCs on the left
+          for (i=1; i<=nxnom; i++){
+              uold[i][0] = 0.0;
+              ucur[i][0] = 0.0;
+          }
 
-    // update solution to next step for n steps
-    for (k=0; k<=nsteps; k++){
-        
-        // Setting up boundary conditions. 
-        // This can be done differently, but while exchaning data, an explicit 
-        // set up would be useful. 
-        
-        // Impose Dirichlet BCs on the corners
-        uold[0][0]    = 0.0;
-        uold[0][0]    = 0.0;
-        ucur[nx+1][0] = 0.0;
-        ucur[nx+1][0] = 0.0;
-        uold[0][ny+1] = 0.0;
-        ucur[0][ny+1] = 0.0;
-        uold[ny+1][0] = 0.0;
-        ucur[ny+1][0] = 0.0;
-        uold[nx+1][ny+1] = 0.0;
-        ucur[ny+1][ny+1] = 0.0;
+          // Impose Dirichlet BCs on the right
+          for (i=1; i<=nxnom; i++){
+              uold[i][ny+1] = 0.0;
+              ucur[i][ny+1] = 0.0;
+          }
 
-        // Impose Dirichlet BCs on the top
-        for (j=1; j<=ny; j++){
-            uold[0][j] = 0.0;
-            ucur[0][j] = 0.0;
-        }
+      }
 
-        // Impose Dirichlet BCs on the bottom
-        for (j=1; j<=ny; j++){
-            uold[nx+1][j] = 0.0;
-            ucur[nx+1][j] = 0.0;
-        }
+       // Exchange data between the patches
+       if (worker==0){     // Currently works for only two processes 
+           MPI_Send(&uold[ixem][0], ny, MPI_DOUBLE, 1, 0, MPI_COMM_WORLD);
+           MPI_Recv(&uold[ixe][0],   ny, MPI_DOUBLE, 1, 1, MPI_COMM_WORLD, &status);
+       } else{            
+           MPI_Send(&uold[1][0], ny, MPI_DOUBLE, 0, 1, MPI_COMM_WORLD);
+           MPI_Recv(&uold[0][0], ny, MPI_DOUBLE, 0, 0, MPI_COMM_WORLD, &status);
+       }
 
-        // Impose Dirichlet BCs on the left
-        for (i=1; i<=ny; i++){
-            uold[i][0] = 0.0;
-            ucur[i][0] = 0.0;
-        }
+       // compute the next time level
+       for (i=1; i<=nxnom; i++){
+           for (j=1; j<=ny; j++){
+               unew[i][j] = 2*ucur[i][j] + uold[i][j] 
+                            + csq*dtdxsq*(ucur[i+1][j] - 2.0*ucur[i][j] + ucur[i-1][j]
+                                        + ucur[i][j+1] - 2.0*ucur[i][j] + ucur[i][j-1]);
+           }
+       }
 
-        // Impose Dirichlet BCs on the right
-        for (i=1; i<=ny; i++){
-            uold[i][ny+1] = 0.0;
-            ucur[i][ny+1] = 0.0;
-        }
-
-        // compute the next time level
-        for (i=1; i<=nx; i++){
-            for (j=1; j<=ny; j++){
-                unew[i][j] = 2*ucur[i][j] + uold[i][j] 
-                             + csq*dtdxsq*(ucur[i+1][j] - 2.0*ucur[i][j] + ucur[i-1][j]
-                                         + ucur[i][j+1] - 2.0*ucur[i][j] + ucur[i][j-1]);
-            }
-        }
-
-        // update the arrays
-        for (i=1; i<=nx; i++){
-            for (j=1; j<=ny; j++){
-                uold[i][j] = ucur[i][j];
-                ucur[i][j] = unew[i][j];
-            }
-        }
-    printf("Finsihed computing timestep: %i\n", k); 
-    }
-    
-    // free memory. There's a corresponding free to every malloc
-    free(*uold);
-    free(*ucur);
-    free(*unew);
-    free(uold);
-    free(ucur);
-    free(unew);
-
-    printf("Process %i of %i\n", worker+1, nprocs);
-    MPI_Finalize();
-    printf("All done!\n");
+       // update the arrays
+       for (i=1; i<=nxnom; i++){
+           for (j=1; j<=ny; j++){
+               uold[i][j] = ucur[i][j];
+               ucur[i][j] = unew[i][j];
+           }
+       }
+   printf("Finsihed computing timestep: %i\n", k); 
+   }
+   
+   printf("Process %i of %i\n", worker+1, nprocs);
+   // free memory. There's a corresponding free to every malloc
+   // Also, every process should kill it.
+   free(*uold);
+   free(*ucur);
+   free(*unew);
+   free(uold);
+   free(ucur);
+   free(unew);
+   MPI_Finalize();
+   printf("All done!\n");
 }
