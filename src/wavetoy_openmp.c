@@ -1,12 +1,13 @@
 /*============================================================*/
 /* Solve a 2D scalar wave equation                            */
-/* Serial Version                                             */
+/* Added OpenMP for evolution loop                            */
 /* Soham 3/2018                                               */
 /*============================================================*/
 
 #include<math.h>
 #include<stdio.h>
 #include<stdlib.h>
+#include<omp.h>
 
 #define nx 100      // no. of points in x
 #define ny 100      // no. of points in y
@@ -63,10 +64,11 @@ int main(){
     }
 
     printf("Jetzt geht's los!\n");
-
+    printf("Running on %i threads\n", omp_get_num_threads());    
+    
     // update solution to next step for n steps
+    #pragma omp parallel for
     for (k=0; k<=nsteps; k++){
-        
         // Setting up boundary conditions. 
         // This can be done differently, but while exchaning data, an explicit 
         // set up would be useful. 

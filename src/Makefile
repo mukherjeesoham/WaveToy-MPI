@@ -1,4 +1,5 @@
-wavetoy: wavetoy_serial.c
-	gcc wavetoy_serial.c -o wavetoy
+wavetoy_serial: wavetoy_serial.c
+	gcc wavetoy_serial.c -o wavetoy_serial
+
 clean:
-	-rm -f wavetoy
+	-rm -f wavetoy_serial
