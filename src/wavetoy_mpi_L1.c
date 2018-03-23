@@ -18,7 +18,7 @@
 
 int main(int argc, char *argv[]){
     int **uold, **unew, **ucur;
-    int **uold1D, **unew1D, **ucur1D;
+    int *uold1D, *unew1D, *ucur1D;
     int nprocs, worker;
     int i, j, k;
     double c, csq, x, y, u, dudt, dx, dy, dt, dtdx, dtdxsq;
@@ -73,12 +73,12 @@ int main(int argc, char *argv[]){
     // This step is quite interesting. It looks 
     // complicated, but all it does is allow for contigous 
     // memory storage.
-    uold1D = malloc(gnxgny*sizeof(int*));
-    ucur1D = malloc(gnxgny*sizeof(int*));
-    unew1D = malloc(gnxgny*sizeof(int*));
-    uold   = malloc(gnx*sizeof(int*));
-    ucur   = malloc(gnx*sizeof(int*));
-    unew   = malloc(gnx*sizeof(int*));
+    uold1D = malloc(gnxgny*sizeof(double*));
+    ucur1D = malloc(gnxgny*sizeof(double*));
+    unew1D = malloc(gnxgny*sizeof(double*));
+    uold   = malloc(gnx*sizeof(double*));
+    ucur   = malloc(gnx*sizeof(double*));
+    unew   = malloc(gnx*sizeof(double*));
     
     for (i=0; i<=gnx; i++){
         uold[i] = &uold1D[i*gny];
@@ -101,15 +101,18 @@ int main(int argc, char *argv[]){
             }
         }
     }
-    
+  
+   printf("Total no. of workers: %i\n", nprocs);
    // Initialize ucur 
    // For this, only the inner boundaries need to be exchanged.
    if (worker==0){     // Currently works for only two processes 
+       printf("Current worker: %i\n", worker);
        MPI_Send(&uold[ixem][0], ny, MPI_DOUBLE, 1, 0, MPI_COMM_WORLD);
        MPI_Recv(&uold[ixe][0],  ny, MPI_DOUBLE, 1, 1, MPI_COMM_WORLD, &status);
    } else{            
-       MPI_Send(&uold[1][0], ny, MPI_DOUBLE, 0, 1, MPI_COMM_WORLD);
+       printf("Current worker: %i\n", worker);
        MPI_Recv(&uold[0][0], ny, MPI_DOUBLE, 0, 0, MPI_COMM_WORLD, &status);
+       MPI_Send(&uold[1][0], ny, MPI_DOUBLE, 0, 1, MPI_COMM_WORLD);
    }
    
    for (i=1; i<=nxnom; i++){
@@ -189,8 +192,8 @@ int main(int argc, char *argv[]){
            MPI_Send(&uold[ixem][0], ny, MPI_DOUBLE, 1, 0, MPI_COMM_WORLD);
            MPI_Recv(&uold[ixe][0],   ny, MPI_DOUBLE, 1, 1, MPI_COMM_WORLD, &status);
        } else{            
-           MPI_Send(&uold[1][0], ny, MPI_DOUBLE, 0, 1, MPI_COMM_WORLD);
            MPI_Recv(&uold[0][0], ny, MPI_DOUBLE, 0, 0, MPI_COMM_WORLD, &status);
+           MPI_Send(&uold[1][0], ny, MPI_DOUBLE, 0, 1, MPI_COMM_WORLD);
        }
 
        // compute the next time level
@@ -213,14 +216,5 @@ int main(int argc, char *argv[]){
    }
    
    printf("Process %i of %i\n", worker+1, nprocs);
-   // free memory. There's a corresponding free to every malloc
-   // Also, every process should kill it.
-   free(*uold);
-   free(*ucur);
-   free(*unew);
-   free(uold);
-   free(ucur);
-   free(unew);
    MPI_Finalize();
-   printf("All done!\n");
 }
