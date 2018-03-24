@@ -1,11 +1,24 @@
-wavetoy_serial: wavetoy_serial.c
-	gcc wavetoy_serial.c -o wavetoy_serial
+TARGET = prog
+LIBS = -lm
+CC = gcc
+CFLAGS = -g -Wall
+
+.PHONY: default all clean
+
+default: $(TARGET)
+all: default
+
+OBJECTS = $(patsubst %.c, %.o, $(wildcard *.c))
+HEADERS = $(wildcard *.h)
+
+%.o: %.c $(HEADERS)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+.PRECIOUS: $(TARGET) $(OBJECTS)
+
+$(TARGET): $(OBJECTS)
+    $(CC) $(OBJECTS) -Wall $(LIBS) -o $@
 
 clean:
-	-rm -f wavetoy_serial
-
-# NOTE: To compile the OpenMP version, use 
-# gcc -fopenmp wavetoy_openmp.c -o wavetoy_openmp
-# will add this in the makefile in future
-# To compile the MPI version, use
-# mpicc wavetoy_mpi_L0.c -o wavetoy_mpi
+	-rm -f *.o
+	-rm -f $(TARGET)

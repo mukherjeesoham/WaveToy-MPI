@@ -14,17 +14,20 @@
 
 #define nx 100      // no. of points in x
 #define ny 100      // no. of points in y
-#define nsteps 10   // no. of time steps
+#define nsteps 10     // no. of time steps
 
 int main(int argc, char *argv[]){
     int **uold, **unew, **ucur;
     int *uold1D, *unew1D, *ucur1D;
     int nprocs, worker;
-    int i, j, k;
     double c, csq, x, y, u, dudt, dx, dy, dt, dtdx, dtdxsq;
     MPI_Status status;
     int nxprocs, nyprocs, nxnom, nynom;
-    int gixs, gixe, giys, giye, ixs, ixe, iys, iye, ixem, iyem, gnx, gny, gnxgny;
+    int i, j, k;
+    int gixs, gixe, giys, giye;
+    int ixs, ixe, iys, iye;
+    int ixem, iyem;
+    int gnx, gny, gnxgny;
     int li, lj;
 
     // Initialize MPI
@@ -52,6 +55,8 @@ int main(int argc, char *argv[]){
     ixe  = nxnom + 1;
     iys  = 0;
     iye  = nynom + 1;
+
+    // ending index minus 1 (useful for exchanging ghost zones)
     ixem = ixe - 1;
     iyem = iye - 1;
 
@@ -64,15 +69,13 @@ int main(int argc, char *argv[]){
     dtdx = dt/dx;
     dtdxsq = dtdx*dtdx;
     
-    // Define array sizes including ghost zones
+    // Define array sizes including ghost zones (or nxnom + 2)
     gnx = ixe - ixs + 1;
     gny = iye - iys + 1;
     gnxgny = gnx*gny;
     
     // Allocate memory dynamically for these arrays
-    // This step is quite interesting. It looks 
-    // complicated, but all it does is allow for contigous 
-    // memory storage.
+    // This can be done differently if you use 1D arrays
     uold1D = malloc(gnxgny*sizeof(double*));
     ucur1D = malloc(gnxgny*sizeof(double*));
     unew1D = malloc(gnxgny*sizeof(double*));
@@ -94,7 +97,7 @@ int main(int argc, char *argv[]){
             u = exp(-x*x/0.01 - y*y/0.01);                  // Initial condition: Gaussian
             // check which processor this point belongs to 
             // and set the point if and only if it belongs to the current processor.
-            if (i <= gixe && i >= gixs){
+            if (i >= gixs && i <= gixe){
                 li = i - gixs + 1;   
                 lj = j;
                 uold[li][lj] = u;
@@ -102,15 +105,12 @@ int main(int argc, char *argv[]){
         }
     }
   
-   printf("Total no. of workers: %i\n", nprocs);
    // Initialize ucur 
    // For this, only the inner boundaries need to be exchanged.
    if (worker==0){     // Currently works for only two processes 
-       printf("Current worker: %i\n", worker);
        MPI_Send(&uold[ixem][0], ny, MPI_DOUBLE, 1, 0, MPI_COMM_WORLD);
        MPI_Recv(&uold[ixe][0],  ny, MPI_DOUBLE, 1, 1, MPI_COMM_WORLD, &status);
    } else{            
-       printf("Current worker: %i\n", worker);
        MPI_Recv(&uold[0][0], ny, MPI_DOUBLE, 0, 0, MPI_COMM_WORLD, &status);
        MPI_Send(&uold[1][0], ny, MPI_DOUBLE, 0, 1, MPI_COMM_WORLD);
    }
@@ -124,97 +124,101 @@ int main(int argc, char *argv[]){
        }
    }
    
-   printf("Jetzt geht's los!\n");
+   if (worker ==0){
+       printf("Jetzt geht's los!\n");
+   }
+
    // update solution to next step for n steps
    for (k=0; k<=nsteps; k++){
       if (worker == 0){
           // Impose Dirichlet BCs on the corners
-          uold[0][0]    = 0.0;
-          ucur[0][0]    = 0.0;
-          uold[0][ny+1] = 0.0;
-          ucur[0][ny+1] = 0.0;
-          uold[nxnom+1][0] = 0.0;
-          ucur[nxnom+1][0] = 0.0;
-          uold[nxnom+1][ny+1] = 0.0;
-          ucur[nynom+1][ny+1] = 0.0;
+          uold[0][0]   = 0.0;
+          ucur[0][0]   = 0.0;
+          uold[0][iye] = 0.0;
+          ucur[0][iye] = 0.0;
+          uold[ixe][0] = 0.0;
+          ucur[ixe][0] = 0.0;
+          uold[ixe][iye] = 0.0;
+          ucur[ixe][iye] = 0.0;
 
           // Impose Dirichlet BCs on the top
-          for (j=1; j<=ny; j++){
+          for (j=1; j<=iyem; j++){
               uold[0][j] = 0.0;
               ucur[0][j] = 0.0;
           }
 
           // Impose Dirichlet BCs on the left
-          for (i=1; i<=nxnom; i++){
+          for (i=1; i<=ixem; i++){
               uold[i][0] = 0.0;
               ucur[i][0] = 0.0;
           }
 
           // Impose Dirichlet BCs on the right
-          for (i=1; i<=nxnom; i++){
-              uold[i][ny+1] = 0.0;
-              ucur[i][ny+1] = 0.0;
+          for (i=1; i<=ixem; i++){
+              uold[i][iye] = 0.0;
+              ucur[i][iye] = 0.0;
           }
           
       } else{
           // Impose Dirichlet BCs on the corners
-          uold[nxnom+1][0] = 0.0;
-          ucur[nxnom+1][0] = 0.0;
-          uold[nxnom+1][ny+1] = 0.0;
-          ucur[nxnom+1][ny+1] = 0.0;
+          uold[ixe][0] = 0.0;
+          ucur[ixe][0] = 0.0;
+          uold[ixe][iye] = 0.0;
+          ucur[ixe][iye] = 0.0;
           uold[0][0] = 0.0;
           ucur[0][0] = 0.0;
-          uold[0][ny+1] = 0.0;
-          ucur[0][ny+1] = 0.0;
+          uold[0][iye] = 0.0;
+          ucur[0][iye] = 0.0;
 
           // Impose Dirichlet BCs on the bottom
-          for (j=1; j<=ny; j++){
-              uold[nxnom+1][j] = 0.0;
-              ucur[nxnom+1][j] = 0.0;
+          for (j=1; j<=iyem; j++){
+              uold[ixe][j] = 0.0;
+              ucur[ixe][j] = 0.0;
           }
           
           // Impose Dirichlet BCs on the left
-          for (i=1; i<=nxnom; i++){
+          for (i=1; i<=ixem; i++){
               uold[i][0] = 0.0;
               ucur[i][0] = 0.0;
           }
 
           // Impose Dirichlet BCs on the right
-          for (i=1; i<=nxnom; i++){
-              uold[i][ny+1] = 0.0;
-              ucur[i][ny+1] = 0.0;
+          for (i=1; i<=ixem; i++){
+              uold[i][iye] = 0.0;
+              ucur[i][iye] = 0.0;
           }
-
+      }
+       
+      // Exchange data between the patches
+      if (worker==0){     // Currently works for only two processes 
+          MPI_Send(&uold[ixem][0], ny, MPI_DOUBLE, 1, 0, MPI_COMM_WORLD);
+          MPI_Recv(&uold[ixe][0],  ny, MPI_DOUBLE, 1, 1, MPI_COMM_WORLD, &status);
+          MPI_Send(&ucur[ixem][0], ny, MPI_DOUBLE, 1, 0, MPI_COMM_WORLD);
+          MPI_Recv(&ucur[ixe][0],  ny, MPI_DOUBLE, 1, 1, MPI_COMM_WORLD, &status);
+      } else{            
+          MPI_Recv(&uold[0][0], ny, MPI_DOUBLE, 0, 0, MPI_COMM_WORLD, &status);
+          MPI_Send(&uold[1][0], ny, MPI_DOUBLE, 0, 1, MPI_COMM_WORLD);
+          MPI_Recv(&ucur[0][0], ny, MPI_DOUBLE, 0, 0, MPI_COMM_WORLD, &status);
+          MPI_Send(&ucur[1][0], ny, MPI_DOUBLE, 0, 1, MPI_COMM_WORLD);
       }
 
-       // Exchange data between the patches
-       if (worker==0){     // Currently works for only two processes 
-           MPI_Send(&uold[ixem][0], ny, MPI_DOUBLE, 1, 0, MPI_COMM_WORLD);
-           MPI_Recv(&uold[ixe][0],   ny, MPI_DOUBLE, 1, 1, MPI_COMM_WORLD, &status);
-       } else{            
-           MPI_Recv(&uold[0][0], ny, MPI_DOUBLE, 0, 0, MPI_COMM_WORLD, &status);
-           MPI_Send(&uold[1][0], ny, MPI_DOUBLE, 0, 1, MPI_COMM_WORLD);
-       }
+      // compute the next time level
+      for (i=1; i<=nxnom; i++){
+          for (j=1; j<=ny; j++){
+              unew[i][j] = 2*ucur[i][j] + uold[i][j] 
+                           + csq*dtdxsq*(ucur[i+1][j] - 2.0*ucur[i][j] + ucur[i-1][j]
+                                       + ucur[i][j+1] - 2.0*ucur[i][j] + ucur[i][j-1]);
+          }
+      }
 
-       // compute the next time level
-       for (i=1; i<=nxnom; i++){
-           for (j=1; j<=ny; j++){
-               unew[i][j] = 2*ucur[i][j] + uold[i][j] 
-                            + csq*dtdxsq*(ucur[i+1][j] - 2.0*ucur[i][j] + ucur[i-1][j]
-                                        + ucur[i][j+1] - 2.0*ucur[i][j] + ucur[i][j-1]);
-           }
-       }
-
-       // update the arrays
-       for (i=1; i<=nxnom; i++){
-           for (j=1; j<=ny; j++){
-               uold[i][j] = ucur[i][j];
-               ucur[i][j] = unew[i][j];
-           }
-       }
-   printf("Finsihed computing timestep: %i\n", k); 
+      // update the arrays
+      for (i=1; i<=nxnom; i++){
+          for (j=1; j<=ny; j++){
+              uold[i][j] = ucur[i][j];
+              ucur[i][j] = unew[i][j];
+          }
+      }
    }
-   
-   printf("Process %i of %i\n", worker+1, nprocs);
+   printf("Process %i of %i finished.\n", worker+1, nprocs);
    MPI_Finalize();
 }

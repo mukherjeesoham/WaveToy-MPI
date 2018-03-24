@@ -26,7 +26,11 @@
 *.a
 *.lib
 
+# Output
+*.dat
+*.DS_Store
 # Executables
 *.exe
 *.out
 *.app
+[0-9][0-9]_*/[!\.]*
