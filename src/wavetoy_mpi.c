@@ -51,7 +51,8 @@ int main(int argc, char *argv[]){
     periods[0] = 0;     // not periodic in x
     periods[1] = 0;     // not periodix in y
     reorder    = 0;     // do not allow MPI to reoder the ranks of the processes.
-   
+
+
     MPI_Cart_create(MPI_COMM_WORLD, ndims, dimsize, periods, reorder, &comm_cart); // Create a new communicator with Cartesian Topology.
     MPI_Cart_shift(comm_cart, ewdir,  1, &cartID, &proc_east);   
     MPI_Cart_shift(comm_cart, ewdir, -1, &cartID, &proc_west);  
@@ -227,7 +228,7 @@ int main(int argc, char *argv[]){
 
    // update solution to next step for n steps
    for (k=0; k<=nt; k++){
-       
+      printf("proc[%i] > Starting iteration %i\n", procID, k);       
       // Exchange data between the patches and set boundary conditions
       switch(procID){
           case 0:
@@ -246,7 +247,7 @@ int main(int argc, char *argv[]){
               }
 
               // set Dirichlet BCs on left edge
-              for (i=1; i<=ixem; j++){
+              for (i=1; i<=ixem; i++){
                   uold[i][0] = 0.0;
                   ucur[i][0] = 0.0;
               }
@@ -268,6 +269,7 @@ int main(int argc, char *argv[]){
               MPI_Irecv(&uold[ixe][iye],    1, MPI_DOUBLE, proc_corner, 2211, MPI_COMM_WORLD, &request[9]);
               MPI_Isend(&ucur[ixem][iyem],  1, MPI_DOUBLE, proc_corner, 1122, MPI_COMM_WORLD, &request[10]);
               MPI_Irecv(&ucur[ixe][iye],    1, MPI_DOUBLE, proc_corner, 2211, MPI_COMM_WORLD, &request[11]);
+              
               break;
           case 1:
               // set Dirichlet BCs nw, ne, se corners
@@ -285,7 +287,7 @@ int main(int argc, char *argv[]){
               }
 
               // set Dirichlet BCs on right edge
-              for (i=1; i<=ixem; j++){
+              for (i=1; i<=ixem; i++){
                   uold[i][iye] = 0.0;
                   ucur[i][iye] = 0.0;
               }
@@ -324,7 +326,7 @@ int main(int argc, char *argv[]){
               }
 
               // set Dirichlet BCs on left edge
-              for (i=1; i<=ixem; j++){
+              for (i=1; i<=ixem; i++){
                   uold[i][0] = 0.0;
                   ucur[i][0] = 0.0;
               }
@@ -363,7 +365,7 @@ int main(int argc, char *argv[]){
               }
 
               // set Dirichlet BCs on right edge
-              for (i=1; i<=ixem; j++){
+              for (i=1; i<=ixem; i++){
                   uold[i][iye] = 0.0;
                   ucur[i][iye] = 0.0;
               }
@@ -388,11 +390,13 @@ int main(int argc, char *argv[]){
               break;
       }
       
+      printf("proc[%i] > Waiting for processes\n", procID);       
       // Make sure all non-blocking messages have arrived
       for (i=0; i<=11; i++){
           MPI_Wait(&request[i], &status);
       } 
-   
+      printf("proc[%i] > Finsihed waiting for processes. Moving on with computation\n", procID);       
+      
       // compute the next time level
       for (i=1; i<=nx; i++){
           for (j=1; j<=nynom; j++){
