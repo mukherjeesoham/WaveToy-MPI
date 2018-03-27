@@ -8,9 +8,9 @@
 #include<stdio.h>
 #include<stdlib.h>
 
-#define nx 10      // no. of points in x
-#define ny 10       // no. of points in y
-#define nsteps 20   // no. of time steps
+#define nx 100      // no. of points in x
+#define ny 100       // no. of points in y
+#define nsteps 100   // no. of time steps
 
 int main(){
     double **uold, **unew, **ucur;
@@ -140,7 +140,7 @@ int main(){
         snprintf(filename, sizeof(char)*32, "../output/timelevel_%02d.dat", k);
         file = fopen(filename, "w");
         for (i=1; i<=nx; i++){
-            fwrite(ucur[i][1], sizeof(double), ny, file);
+            fwrite(&ucur[i][1], sizeof(double), ny, file);
         }
         fclose(file);
 
