@@ -10,8 +10,8 @@
 #include<stdio.h>
 #include<stdlib.h>
 
-#define nx 3      // no. of points in x
-#define ny 3      // no. of points in y
+#define nx 2      // no. of points in x
+#define ny 2      // no. of points in y
 
 int sub2ind(int ix, int iy, int nxproc, int nyproc){
     return iy + nxproc*ix;
@@ -26,11 +26,7 @@ int main(int argc, char *argv[]){
     int nxnom, nynom, nprocs, procID;
     int cartID[2];
     int nxproc, nyproc, testproc;
-    int proc_north, proc_south, proc_east, proc_west,
-        proc_se, proc_sw, proc_nw, proc_ne;
     MPI_Status status;
-    MPI_Datatype row_type, column_type;
-    MPI_Request request[16*9];
 
     // Initialize MPI
     MPI_Init(&argc, &argv);
@@ -38,8 +34,8 @@ int main(int argc, char *argv[]){
     MPI_Comm_rank(MPI_COMM_WORLD, &procID);
 
     // number of processors in each direction
-    nxproc = 3;
-    nyproc = 3;
+    nxproc = 2;
+    nyproc = 2;
 
     // nominal number of points in each patch without ghost zones
     nxnom = nx/nxproc;
@@ -78,189 +74,37 @@ int main(int argc, char *argv[]){
         }
     }
 
-    testproc=4;
+    // Set up parallel I/O
+    // create user-defined types for parallel i/o
+      
+    size[0]    = nx;
+    size[1]    = ny;
+    subsize[0] = nxnom;
+    subsize[1] = nynom;
 
-    if (procID==testproc){
-    printf("------------------------------------\n");
-    printf("proc[%i] before exchange\n", procID);
-    printf("------------------------------------\n");
-    for (i=0; i<=ixe; i++){
-        for (j=0; j<=iye; j++){
-            printf("%1.1f\t", uold[i][j]);
-        }
-        printf("\n");
-    }
-    printf("------------------------------------\n");
-    }
+    MPI_Cart_coords(comm_cart, myid, 2, start);
 
-    // Define MPI datatypes for contiguous and non-contiguous data
-    MPI_Type_contiguous(nynom, MPI_DOUBLE, &row_type);
-    MPI_Type_commit(&row_type);
-    MPI_Type_vector(nxnom, 1, gny, MPI_DOUBLE, &column_type);
-    MPI_Type_commit(&column_type);
+    start[0] *= nxnom;
+    start[1] *= nynom;
 
-    // Create a cart-grid
-    cartID[1] = procID%nxproc;
-    cartID[0] = (procID/nxproc)%nyproc;
+    MPI_Type_create_subarray(2, size, subsize, start, MPI_ORDER_C, MPI_DOUBLE, &file_type);
+    MPI_Type_commit(&file_type);
 
-    // Figure out surroudings
-    proc_north = sub2ind(cartID[0] - 1, cartID[1],     nxproc, nyproc);
-    proc_south = sub2ind(cartID[0] + 1, cartID[1],     nxproc, nyproc);
-    proc_east  = sub2ind(cartID[0],     cartID[1] + 1, nxproc, nyproc);
-    proc_west  = sub2ind(cartID[0],     cartID[1] - 1, nxproc, nyproc);
-    proc_nw    = sub2ind(cartID[0] - 1, cartID[1] - 1, nxproc, nyproc);
-    proc_ne    = sub2ind(cartID[0] - 1, cartID[1] + 1, nxproc, nyproc);
-    proc_se    = sub2ind(cartID[0] + 1, cartID[1] + 1, nxproc, nyproc);
-    proc_sw    = sub2ind(cartID[0] + 1, cartID[1] - 1, nxproc, nyproc);
+    size[0]    = gnx;
+    size[1]    = gny;
+    subsize[0] = nxnom;
+    subsize[1] = nynom;
+    start[0]   = 1;
+    start[1]   = 1;
+    
+    MPI_Type_create_subarray(2, size, subsize, start, MPI_ORDER_C, MPI_DOUBLE, &mem_type);
+    MPI_Type_commit(&mem_type);
 
-    // Initiate communication
-    if (cartID[0] == 0 && cartID[1] == 0){
-          MPI_Isend(&uold[1][iyem],    1, column_type, proc_east,   2, MPI_COMM_WORLD, &request[(procID*16)+0]);  // exchange RC
-          MPI_Irecv(&uold[1][iye],     1, column_type, proc_east,   3, MPI_COMM_WORLD, &request[(procID*16)+1]);
-          MPI_Isend(&uold[ixem][1],    1, row_type,    proc_south,  6, MPI_COMM_WORLD, &request[(procID*16)+2]);  // exchange BR
-          MPI_Irecv(&uold[ixe][1],     1, row_type,    proc_south,  7, MPI_COMM_WORLD, &request[(procID*16)+3]);
-          MPI_Isend(&uold[ixem][iyem], 1, MPI_DOUBLE,  proc_se,    14, MPI_COMM_WORLD, &request[(procID*16)+4]);  // exchange SEC
-          MPI_Irecv(&uold[ixe][iye],   1, MPI_DOUBLE,  proc_se,    15, MPI_COMM_WORLD, &request[(procID*16)+5]);
-
-          for (i=procID*16; i<=(procID*16)+5; i++){
-              MPI_Wait(&request[i], &status);
-              printf("proc[%i] request[%i] completed.\n", procID, i);
-          }
-    } else if (cartID[0] == 0 && cartID[1] == (nyproc-1)){
-          MPI_Isend(&uold[1][1],       1, column_type, proc_west,   0, MPI_COMM_WORLD, &request[(procID*16)+0]);  // exchange LC
-          MPI_Irecv(&uold[1][0],       1, column_type, proc_west,   1, MPI_COMM_WORLD, &request[(procID*16)+1]);
-          MPI_Isend(&uold[ixem][1],    1, row_type,    proc_south,  6, MPI_COMM_WORLD, &request[(procID*16)+2]);  // exchange BR
-          MPI_Irecv(&uold[ixe][1],     1, row_type,    proc_south,  7, MPI_COMM_WORLD, &request[(procID*16)+3]);
-          MPI_Isend(&uold[ixem][1],    1, MPI_DOUBLE,  proc_sw,    12, MPI_COMM_WORLD, &request[(procID*16)+4]); // exchange SWC
-          MPI_Irecv(&uold[ixe][0],     1, MPI_DOUBLE,  proc_sw,    13, MPI_COMM_WORLD, &request[(procID*16)+5]);
-
-          for (i=procID*16; i<=(procID*16)+5; i++){
-              MPI_Wait(&request[i], &status);
-              printf("proc[%i] request[%i] completed.\n", procID, i);
-          }
-    } else if (cartID[0] == (nxproc-1) && cartID[1] == 0) {
-          MPI_Isend(&uold[1][iyem],    1, column_type, proc_east,   2, MPI_COMM_WORLD, &request[(procID*16)+2]);  // exchange RC
-          MPI_Irecv(&uold[1][iye],     1, column_type, proc_east,   3, MPI_COMM_WORLD, &request[(procID*16)+3]);
-          MPI_Isend(&uold[1][1],       1, row_type,    proc_north,  4, MPI_COMM_WORLD, &request[(procID*16)+4]);  // exchange TR
-          MPI_Irecv(&uold[0][1],       1, row_type,    proc_north,  5, MPI_COMM_WORLD, &request[(procID*16)+5]);
-          MPI_Isend(&uold[1][iyem],    1, MPI_DOUBLE,  proc_ne,    10, MPI_COMM_WORLD, &request[(procID*16)+10]); // exchange NEC
-          MPI_Irecv(&uold[0][iye],     1, MPI_DOUBLE,  proc_ne,    11, MPI_COMM_WORLD, &request[(procID*16)+11]);
-
-          for (i=procID*16; i<=(procID*16)+5; i++){
-              MPI_Wait(&request[i], &status);
-              printf("proc[%i] request[%i] completed.\n", procID, i);
-          }
-    } else if (cartID[0] == (nxproc-1) && cartID[1] == (nyproc-1)) {
-          MPI_Isend(&uold[1][1],       1, column_type, proc_west,   0, MPI_COMM_WORLD, &request[(procID*16)+0]);  // exchange LC
-          MPI_Irecv(&uold[1][0],       1, column_type, proc_west,   1, MPI_COMM_WORLD, &request[(procID*16)+1]);
-          MPI_Isend(&uold[1][1],       1, row_type,    proc_north,  4, MPI_COMM_WORLD, &request[(procID*16)+2]);  // exchange TR
-          MPI_Irecv(&uold[0][1],       1, row_type,    proc_north,  5, MPI_COMM_WORLD, &request[(procID*16)+3]);
-          MPI_Isend(&uold[1][1],       1, MPI_DOUBLE,  proc_nw,     8, MPI_COMM_WORLD, &request[(procID*16)+4]);  // exchange NWC
-          MPI_Irecv(&uold[0][0],       1, MPI_DOUBLE,  proc_nw,     9, MPI_COMM_WORLD, &request[(procID*16)+5]);
-
-          for (i=procID*16; i<=(procID*16)+5; i++){
-              MPI_Wait(&request[i], &status);
-              printf("proc[%i] request[%i] completed.\n", procID, i);
-          }
-    } else if (cartID[0] == 0) {
-          MPI_Isend(&uold[1][1],       1, column_type, proc_west,   0, MPI_COMM_WORLD, &request[(procID*16)+0]);  // exchange LC
-          MPI_Irecv(&uold[1][0],       1, column_type, proc_west,   1, MPI_COMM_WORLD, &request[(procID*16)+1]);
-          MPI_Isend(&uold[1][iyem],    1, column_type, proc_east,   2, MPI_COMM_WORLD, &request[(procID*16)+2]);  // exchange RC
-          MPI_Irecv(&uold[1][iye],     1, column_type, proc_east,   3, MPI_COMM_WORLD, &request[(procID*16)+3]);
-          MPI_Isend(&uold[ixem][1],    1, row_type,    proc_south,  6, MPI_COMM_WORLD, &request[(procID*16)+4]);  // exchange BR
-          MPI_Irecv(&uold[ixe][1],     1, row_type,    proc_south,  7, MPI_COMM_WORLD, &request[(procID*16)+5]);
-          MPI_Isend(&uold[ixem][1],    1, MPI_DOUBLE,  proc_sw,    12, MPI_COMM_WORLD, &request[(procID*16)+6]);  // exchange SWC
-          MPI_Irecv(&uold[ixe][0],     1, MPI_DOUBLE,  proc_sw,    13, MPI_COMM_WORLD, &request[(procID*16)+7]);
-          MPI_Isend(&uold[ixem][iyem], 1, MPI_DOUBLE,  proc_se,    14, MPI_COMM_WORLD, &request[(procID*16)+8]);  // exchange SEC
-          MPI_Irecv(&uold[ixe][iye],   1, MPI_DOUBLE,  proc_se,    15, MPI_COMM_WORLD, &request[(procID*16)+9]);
-
-          for (i=procID*16; i<=(procID*16)+9; i++){
-              MPI_Wait(&request[i], &status);
-              printf("proc[%i] request[%i] completed.\n", procID, i);
-          }
-    } else if (cartID[0] == (nxproc-1)) {
-          MPI_Isend(&uold[1][1],       1, column_type, proc_west,   0, MPI_COMM_WORLD, &request[(procID*16)+0]);  // exchange LC
-          MPI_Irecv(&uold[1][0],       1, column_type, proc_west,   1, MPI_COMM_WORLD, &request[(procID*16)+1]);
-          MPI_Isend(&uold[1][iyem],    1, column_type, proc_east,   2, MPI_COMM_WORLD, &request[(procID*16)+2]);  // exchange RC
-          MPI_Irecv(&uold[1][iye],     1, column_type, proc_east,   3, MPI_COMM_WORLD, &request[(procID*16)+3]);
-          MPI_Isend(&uold[1][1],       1, row_type,    proc_north,  4, MPI_COMM_WORLD, &request[(procID*16)+4]);  // exchange TR
-          MPI_Irecv(&uold[0][1],       1, row_type,    proc_north,  5, MPI_COMM_WORLD, &request[(procID*16)+5]);
-          MPI_Isend(&uold[1][1],       1, MPI_DOUBLE,  proc_nw,     8, MPI_COMM_WORLD, &request[(procID*16)+6]);  // exchange NWC
-          MPI_Irecv(&uold[0][0],       1, MPI_DOUBLE,  proc_nw,     9, MPI_COMM_WORLD, &request[(procID*16)+7]);
-          MPI_Isend(&uold[1][iyem],    1, MPI_DOUBLE,  proc_ne,    10, MPI_COMM_WORLD, &request[(procID*16)+8]);  // exchange NEC
-          MPI_Irecv(&uold[0][iye],     1, MPI_DOUBLE,  proc_ne,    11, MPI_COMM_WORLD, &request[(procID*16)+9]);
-
-          for (i=procID*16; i<=(procID*16)+9; i++){
-              MPI_Wait(&request[i], &status);
-              printf("proc[%i] request[%i] completed.\n", procID, i);
-          }
-    } else if (cartID[1] == 0) {
-          MPI_Isend(&uold[1][iyem],    1, column_type, proc_east,   2, MPI_COMM_WORLD, &request[(procID*16)+0]);  // exchange RC
-          MPI_Irecv(&uold[1][iye],     1, column_type, proc_east,   3, MPI_COMM_WORLD, &request[(procID*16)+1]);
-          MPI_Isend(&uold[1][1],       1, row_type,    proc_north,  4, MPI_COMM_WORLD, &request[(procID*16)+2]);  // exchange TR
-          MPI_Irecv(&uold[0][1],       1, row_type,    proc_north,  5, MPI_COMM_WORLD, &request[(procID*16)+3]);
-          MPI_Isend(&uold[ixem][1],    1, row_type,    proc_south,  6, MPI_COMM_WORLD, &request[(procID*16)+4]);  // exchange BR
-          MPI_Irecv(&uold[ixe][1],     1, row_type,    proc_south,  7, MPI_COMM_WORLD, &request[(procID*16)+5]);
-          MPI_Isend(&uold[1][iyem],    1, MPI_DOUBLE,  proc_ne,    10, MPI_COMM_WORLD, &request[(procID*16)+6]);  // exchange NEC
-          MPI_Irecv(&uold[0][iye],     1, MPI_DOUBLE,  proc_ne,    11, MPI_COMM_WORLD, &request[(procID*16)+7]);
-          MPI_Isend(&uold[ixem][iyem], 1, MPI_DOUBLE,  proc_se,    14, MPI_COMM_WORLD, &request[(procID*16)+8]);  // exchange SEC
-          MPI_Irecv(&uold[ixe][iye],   1, MPI_DOUBLE,  proc_se,    15, MPI_COMM_WORLD, &request[(procID*16)+9]);
-
-          for (i=procID*16; i<=(procID*16)+9; i++){
-              MPI_Wait(&request[i], &status);
-              printf("proc[%i] request[%i] completed.\n", procID, i);
-          }
-    } else if (cartID[1] == (nyproc-1)) {
-          MPI_Isend(&uold[1][1],       1, column_type, proc_west,   0, MPI_COMM_WORLD, &request[(procID*16)+0]);  // exchange LC
-          MPI_Irecv(&uold[1][0],       1, column_type, proc_west,   1, MPI_COMM_WORLD, &request[(procID*16)+1]);
-          MPI_Isend(&uold[1][1],       1, row_type,    proc_north,  4, MPI_COMM_WORLD, &request[(procID*16)+2]);  // exchange TR
-          MPI_Irecv(&uold[0][1],       1, row_type,    proc_north,  5, MPI_COMM_WORLD, &request[(procID*16)+3]);
-          MPI_Isend(&uold[ixem][1],    1, row_type,    proc_south,  6, MPI_COMM_WORLD, &request[(procID*16)+4]);  // exchange BR
-          MPI_Irecv(&uold[ixe][1],     1, row_type,    proc_south,  7, MPI_COMM_WORLD, &request[(procID*16)+5]);
-          MPI_Isend(&uold[1][1],       1, MPI_DOUBLE,  proc_nw,     8, MPI_COMM_WORLD, &request[(procID*16)+6]);  // exchange NWC
-          MPI_Irecv(&uold[0][0],       1, MPI_DOUBLE,  proc_nw,     9, MPI_COMM_WORLD, &request[(procID*16)+7]);
-          MPI_Isend(&uold[ixem][1],    1, MPI_DOUBLE,  proc_sw,    12, MPI_COMM_WORLD, &request[(procID*16)+8]);  // exchange SWC
-          MPI_Irecv(&uold[ixe][0],     1, MPI_DOUBLE,  proc_sw,    13, MPI_COMM_WORLD, &request[(procID*16)+9]);
-
-          for (i=procID*16; i<=(procID*16)+9; i++){
-              MPI_Wait(&request[i], &status);
-              printf("proc[%i] request[%i] completed.\n", procID, i);
-          }
-    } else {
-        MPI_Isend(&uold[1][1],        1, column_type, proc_west,   0, MPI_COMM_WORLD, &request[(procID*16)+0]);   // exchange LC
-        MPI_Irecv(&uold[1][0],        1, column_type, proc_west,   1, MPI_COMM_WORLD, &request[(procID*16)+1]);
-        MPI_Isend(&uold[1][iyem],     1, column_type, proc_east,   2, MPI_COMM_WORLD, &request[(procID*16)+2]);   // exchange RC
-        MPI_Irecv(&uold[1][iye],      1, column_type, proc_east,   3, MPI_COMM_WORLD, &request[(procID*16)+3]);
-        MPI_Isend(&uold[1][1],        1, row_type,    proc_north,  4, MPI_COMM_WORLD, &request[(procID*16)+4]);   // exchange TR
-        MPI_Irecv(&uold[0][1],        1, row_type,    proc_north,  5, MPI_COMM_WORLD, &request[(procID*16)+5]);
-        MPI_Isend(&uold[ixem][1],     1, row_type,    proc_south,  6, MPI_COMM_WORLD, &request[(procID*16)+6]);   // exchange BR
-        MPI_Irecv(&uold[ixe][1],      1, row_type,    proc_south,  7, MPI_COMM_WORLD, &request[(procID*16)+7]);
-        MPI_Isend(&uold[1][1],        1, MPI_DOUBLE,  proc_nw,     8, MPI_COMM_WORLD, &request[(procID*16)+8]);   // exchange NWC
-        MPI_Irecv(&uold[0][0],        1, MPI_DOUBLE,  proc_nw,     9, MPI_COMM_WORLD, &request[(procID*16)+9]);
-        MPI_Isend(&uold[1][iyem],     1, MPI_DOUBLE,  proc_ne,    10, MPI_COMM_WORLD, &request[(procID*16)+10]);  // exchange NEC
-        MPI_Irecv(&uold[0][iye],      1, MPI_DOUBLE,  proc_ne,    11, MPI_COMM_WORLD, &request[(procID*16)+11]);
-        MPI_Isend(&uold[ixem][1],     1, MPI_DOUBLE,  proc_sw,    12, MPI_COMM_WORLD, &request[(procID*16)+12]);  // exchange SWC
-        MPI_Irecv(&uold[ixe][0],      1, MPI_DOUBLE,  proc_sw,    13, MPI_COMM_WORLD, &request[(procID*16)+13]);
-        MPI_Isend(&uold[ixem][iyem],  1, MPI_DOUBLE,  proc_se,    14, MPI_COMM_WORLD, &request[(procID*16)+14]);  // exchange SEC
-        MPI_Irecv(&uold[ixe][iye],    1, MPI_DOUBLE,  proc_se,    15, MPI_COMM_WORLD, &request[(procID*16)+15]);
-
-        for (i=procID*16; i<=(procID*16)+15; i++){
-            MPI_Wait(&request[i], &status);
-            printf("proc[%i] request[%i] completed.\n", procID, i);
-        }
-    }
-
-    if (procID==testproc){
-    printf("proc[%i] after exchange\n", procID);
-    printf("------------------------------------\n");
-    for (i=0; i<=ixe; i++){
-        for (j=0; j<=iye; j++){
-            printf("%1.1f\t", uold[i][j]);
-        }
-        printf("\n");
-    }
-    printf("------------------------------------\n");
-    }
-
+    // open file for MPI-2 parallel I/O
+    MPI_File_open(MPI_COMM_WORLD, "output.dat", MPI_MODE_CREATE|MPI_MODE_WRONLY, MPI_INFO_NULL, &fh);
+    MPI_File_set_view(fh, 0, MPI_DOUBLE, file_type, "native", MPI_INFO_NULL);
+    MPI_File_write_all(fh, &new[0][0], 1, mem_type, &status);
+    MPI_File_close(&fh);
+    
     MPI_Finalize();
 }
