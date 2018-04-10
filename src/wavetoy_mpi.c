@@ -30,7 +30,7 @@ int main(int argc, char *argv[]){
     MPI_Status status;
     MPI_Datatype row_type, column_type; // for message passing 
     MPI_Datatype mem_type, file_type;   // for paralel I/O
-    MPI_Request request[12];            // request handle array for non-blocking send and recieves 
+    MPI_Request request[48];            // request handle array for non-blocking send and recieves 
     MPI_Comm comm_cart;                 // Communicator handle for the virtual topology
     MPI_File fh;                        // for parallel I/O
 
@@ -45,35 +45,6 @@ int main(int argc, char *argv[]){
     dimsize[0] = nprocs/ndims;      // no. of processes in x direction
     dimsize[1] = nprocs/ndims;      // no. of processes in y direction
     
-    // Create a virtual topology for 4 procs
-    nsdir = 0;          // Direction label for north-south
-    ewdir = 1;          // Direction label for east-west
-    periods[0] = 0;     // not periodic in x
-    periods[1] = 0;     // not periodix in y
-    reorder    = 0;     // do not allow MPI to reoder the ranks of the processes.
-
-
-    MPI_Cart_create(MPI_COMM_WORLD, ndims, dimsize, periods, reorder, &comm_cart); // Create a new communicator with Cartesian Topology.
-    MPI_Cart_shift(comm_cart, ewdir,  1, &cartID, &proc_east);   
-    MPI_Cart_shift(comm_cart, ewdir, -1, &cartID, &proc_west);  
-    MPI_Cart_shift(comm_cart, nsdir, -1, &cartID, &proc_north); 
-    MPI_Cart_shift(comm_cart, nsdir,  1, &cartID, &proc_south); 
-
-    // now define the processors to exchange data at the corners
-    switch(procID){
-        case 0:
-            proc_corner = 3;
-            break;
-        case 1:
-            proc_corner = 2;  
-            break;
-        case 2:
-            proc_corner = 1; 
-            break;
-        case 3:
-            proc_corner = 0;
-            break;
-    }
 
     // nominal number of points in each patch without ghost zones
     nxnom = nx/dimsize[0]; 
@@ -150,14 +121,13 @@ int main(int argc, char *argv[]){
    MPI_Type_commit(&column_type);
    MPI_Type_contiguous(nynom, MPI_DOUBLE, &row_type);
    MPI_Type_commit(&row_type);
-   
+  
    // Initialize ucur
-   switch(procID){
-       case 0:
-           // send and recieve the left edge
-           MPI_Isend(&uold[1][iyem], 1, column_type, proc_east,  1112, comm_cart, &request[0]); 
+   if (procID==0){
+           // send and recieve the right edge
+           MPI_Isend(&uold[1][iyem], 1, column_type, proc_east,  1112, MPI_COMM_WORLD, &request[0]); 
            MPI_Irecv(&uold[1][iye],  1, column_type, proc_east,  1211, comm_cart, &request[1]); 
-           
+          
            // send and recieve the bottom edge
            MPI_Isend(&uold[ixem][1], 1, row_type,    proc_south, 1121, comm_cart, &request[2]);
            MPI_Irecv(&uold[ixe][1],  1, row_type,    proc_south, 2111, comm_cart, &request[3]); 
@@ -166,52 +136,58 @@ int main(int argc, char *argv[]){
            MPI_Isend(&uold[ixem][iyem],  1, MPI_DOUBLE, proc_corner, 1122, MPI_COMM_WORLD, &request[4]);
            MPI_Irecv(&uold[ixe][iye],    1, MPI_DOUBLE, proc_corner, 2211, MPI_COMM_WORLD, &request[5]);
            break;
-       case 1:
-           // send and recieve the right edge
-           MPI_Isend(&uold[1][1],    1, column_type, proc_west,  1211, comm_cart, &request[0]); 
-           MPI_Irecv(&uold[1][0],    1, column_type, proc_west,  1112, comm_cart, &request[1]); 
-           
+    
+   } else if (procID==1){
+           // send and recieve the left edge
+           MPI_Isend(&uold[1][1],    1, column_type, 0,  1211, comm_cart, &request[6]); 
+           MPI_Irecv(&uold[1][0],    1, column_type, 0,  1112, MPI_COMM_WORLD, &request[7]); 
+          
            // send and recieve the bottom edge
-           MPI_Isend(&uold[ixem][1], 1, row_type,    proc_south, 1222, comm_cart, &request[2]);
-           MPI_Irecv(&uold[ixe][1],  1, row_type,    proc_south, 2212, comm_cart, &request[3]); 
+           MPI_Isend(&uold[ixem][1], 1, row_type,    proc_south, 1222, comm_cart, &request[8]);
+           MPI_Irecv(&uold[ixe][1],  1, row_type,    proc_south, 2212, comm_cart, &request[9]); 
           
            // send and recieve the corner
-           MPI_Isend(&uold[ixem][1], 1, MPI_DOUBLE,  proc_corner, 1221, MPI_COMM_WORLD, &request[4]);
-           MPI_Irecv(&uold[ixe][0],  1, MPI_DOUBLE,  proc_corner, 2112, MPI_COMM_WORLD, &request[5]);
+           MPI_Isend(&uold[ixem][1], 1, MPI_DOUBLE,  proc_corner, 1221, MPI_COMM_WORLD, &request[10]);
+           MPI_Irecv(&uold[ixe][0],  1, MPI_DOUBLE,  proc_corner, 2112, MPI_COMM_WORLD, &request[11]);
            break;
        case 2:
            // send and recieve the left edge
-           MPI_Isend(&uold[1][iyem], 1, column_type, proc_east,  1112, comm_cart, &request[0]); 
-           MPI_Irecv(&uold[1][iye],  1, column_type, proc_east,  1211, comm_cart, &request[1]); 
+           MPI_Isend(&uold[1][iyem], 1, column_type, proc_east,  1112, comm_cart, &request[12]); 
+           MPI_Irecv(&uold[1][iye],  1, column_type, proc_east,  1211, comm_cart, &request[13]); 
            
            // send and recieve the top edge
-           MPI_Isend(&uold[1][1],    1, row_type,    proc_north, 2111, comm_cart, &request[2]);
-           MPI_Irecv(&uold[0][1],    1, row_type,    proc_north, 1121, comm_cart, &request[3]); 
+           MPI_Isend(&uold[1][1],    1, row_type,    proc_north, 2111, comm_cart, &request[14]);
+           MPI_Irecv(&uold[0][1],    1, row_type,    proc_north, 1121, comm_cart, &request[15]); 
           
            // send and recieve the corner
-           MPI_Isend(&uold[1][iyem], 1, MPI_DOUBLE, proc_corner, 1122, MPI_COMM_WORLD, &request[4]);
-           MPI_Irecv(&uold[0][iye],  1, MPI_DOUBLE, proc_corner, 2211, MPI_COMM_WORLD, &request[5]);
+           MPI_Isend(&uold[1][iyem], 1, MPI_DOUBLE, proc_corner, 1122, MPI_COMM_WORLD, &request[16]);
+           MPI_Irecv(&uold[0][iye],  1, MPI_DOUBLE, proc_corner, 2211, MPI_COMM_WORLD, &request[17]);
            break;
        case 3:
            // send and recieve the right edge
-           MPI_Isend(&uold[1][1],    1, column_type, proc_west,  2221, comm_cart, &request[0]); 
-           MPI_Irecv(&uold[1][0],    1, column_type, proc_west,  2122, comm_cart, &request[1]); 
+           MPI_Isend(&uold[1][1],    1, column_type, proc_west,  2221, comm_cart, &request[18]); 
+           MPI_Irecv(&uold[1][0],    1, column_type, proc_west,  2122, comm_cart, &request[19]); 
            
            // send and recieve the top edge
-           MPI_Isend(&uold[1][1],    1, row_type,    proc_south, 2212, comm_cart, &request[2]);
-           MPI_Irecv(&uold[0][1],    1, row_type,    proc_south, 1222, comm_cart, &request[3]); 
+           MPI_Isend(&uold[1][1],    1, row_type,    proc_south, 2212, comm_cart, &request[20]);
+           MPI_Irecv(&uold[0][1],    1, row_type,    proc_south, 1222, comm_cart, &request[21]); 
           
            // send and recieve the corner
-           MPI_Isend(&uold[1][1],    1, MPI_DOUBLE,  proc_corner, 2211, MPI_COMM_WORLD, &request[4]);
-           MPI_Irecv(&uold[0][0],    1, MPI_DOUBLE,  proc_corner, 1122, MPI_COMM_WORLD, &request[5]);
+           MPI_Isend(&uold[1][1],    1, MPI_DOUBLE,  proc_corner, 2211, MPI_COMM_WORLD, &request[22]);
+           MPI_Irecv(&uold[0][0],    1, MPI_DOUBLE,  proc_corner, 1122, MPI_COMM_WORLD, &request[23]);
            break;
    }
 
-   // Make sure all non-blocking messages have arrived
-   for (i=0; i<=5; i++){
+   printf("+ proc[%i] > Waiting for communications to end\n", procID);       
+   
+   // Make sure all non-blocking messages have arrive for each process
+   for (i=procID*6; i<=(procID*6 + 5); i++){
+   //    printf("proc[%i] checking request[%i]\n", procID, i);
        MPI_Wait(&request[i], &status);
    } 
-   
+   printf("- proc[%i] > Finsihed waiting for communication. Moving on with computation\n", procID);       
+ 
+   /*
    // Compute ucur
    for (i=1; i<=nxnom; i++){
        for (j=1; j<=nynom; j++){   
@@ -449,13 +425,14 @@ int main(int argc, char *argv[]){
       MPI_Type_create_subarray(2, size, subsize, start, MPI_ORDER_C, MPI_INT, &mem_type);
       MPI_Type_commit(&mem_type);
 
-      /* open file for MPI-2 parallel i/o */
+      // open file for MPI-2 parallel i/o 
       MPI_File_open(MPI_COMM_WORLD, "wavetoy_timelevel.dat", MPI_MODE_CREATE|MPI_MODE_WRONLY, MPI_INFO_NULL, &fh);
       MPI_File_set_view(fh, 0, MPI_INT, file_type, "native", MPI_INFO_NULL);
       MPI_File_write_all(fh, &unew[0][0], 1, mem_type, &status);
       MPI_File_close(&fh);
    }
+   */
 
-   printf("Process %i of %i finished.\n", procID, nprocs);
+   printf("proc[%i] > Finished.\n", procID);
    MPI_Finalize();
 }
