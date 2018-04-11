@@ -114,6 +114,8 @@ int main(int argc, char *argv[]){
    
     // Let process 0 return the result
     if (rank==0) printf("-- Integral = %g\n", sum);
+    
+    MPI_Barrier(MPI_COMM_WORLD);
     if (rank==0) printf("-- All done. Exiting MPI environment.\n");
     
     MPI_Finalize();

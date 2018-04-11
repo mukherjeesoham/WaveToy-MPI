@@ -1,7 +1,5 @@
 /*============================================================*/
-/* Solve a 2D scalar wave equation                            */
-/* MPI implementation                                         */
-/* Generalize to n processes in each direction                */
+/* Test MPI_Reduce operation                                  */
 /* Soham 3/2018                                               */
 /*============================================================*/
 
@@ -10,133 +8,113 @@
 #include<stdio.h>
 #include<stdlib.h>
 
-#define nx 2      // no. of points in x
-#define ny 2      // no. of points in y
-
 int main(int argc, char *argv[]){
-    double **uold,  **ucur;
-    double *uold1D, *ucur1D;
-    int i, j, li, lj, l, m;
+    int i, j, li, lj;
     int gixs, gixe, giys, giye;
-    int ixs, ixe, iys, iye, ixem, iyem;
-    int gnx, gny, gnxgny;
-    int nxnom, nynom, nprocs, procID;
-    int nxproc, nyproc;
-    double x, y, dx, dy, sum, sumloc;
-    double wx[nx], wy[ny];
+    int lixs, lixe, liys, liye, lixm, liym;
+    int nx, ny, tnx, tny, tnxtny;
+    int nxprocs, nyprocs, nxnom, nynom, nprocs, rank;
+    double **old, *old1d;
+    double x, y, sum, sumreduce;
 
-    MPI_Datatype  mem_type, file_type;
-    MPI_Comm comm_cart;
-    MPI_File fh;
-    FILE *fp;
-
+    // Number of points in each direction (without ghost zones)
+    sscanf(argv[1], "%i", &nx);      
+    sscanf(argv[2], "%i", &ny);      
+   
     // Initialize MPI
     MPI_Init(&argc, &argv);
     MPI_Comm_size(MPI_COMM_WORLD, &nprocs);
-    MPI_Comm_rank(MPI_COMM_WORLD, &procID);
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
-    // number of processors in each direction
-    nxproc = 2;
-    nyproc = 2;
+    // number of processors in each direction [Fair division?]
+    nxprocs = (nprocs*nx)/(nx+ny);
+    nyprocs = (nprocs*ny)/(nx+ny);
 
+    // Abort if work can't be divided nicely.
+    if (nxprocs == 0 || nyprocs == 0 || nxnom == 0 || nynom == 0) {
+        if (rank == 0) printf("ERROR: Could not (nicely) divide the work among total number of processes\n");
+        MPI_Abort(MPI_COMM_WORLD, 1);
+    }
+    
     // nominal number of points in each patch without ghost zones
-    nxnom = nx/nxproc;
-    nynom = ny/nyproc;
-   
-    // global indices without ghost zones
-    gixs = ((procID/nxproc)*nxnom) + 1;  
+    nxnom = nx/nxprocs;
+    nynom = ny/nyprocs;
+    
+    // Print some info to screen
+    if (rank == 0){
+        printf("------------------------------------------------------------------------\n");
+        printf("Starting Wavetoy-MPI\n");
+        printf("------------------------------------------------------------------------\n");
+        printf("-- Basic MPI Info\n");
+        printf("   | Number of points along x = %i\n", nx);
+        printf("   | Number of points along y = %i\n", ny);
+        printf("   | Number of procs along x  = %i\n", nxprocs);
+        printf("   | Number of procs along y  = %i\n", nyprocs);
+    }
+    
+    // global indices without ghost zones ('s' and 'e' refer to start and end)
+    gixs = ((rank/nxprocs)*nxnom) + 1;  
     gixe = gixs + nxnom - 1;             
-    giys = ((procID%nyproc)*nynom) + 1;  
+    giys = ((rank%nyprocs)*nynom) + 1;  
     giye = giys + nynom - 1;             
     
     // local starting and ending indices (including ghost zones)
-    ixs  = 0;
-    ixe  = nxnom + 1;
-    iys  = 0;
-    iye  = nynom + 1;
+    lixs = 0;
+    lixe = nxnom + 1;
+    liys = 0;
+    liye = nynom + 1;
 
     // ending index minus 1 (useful for exchanging ghost zones)
-    ixem = ixe - 1;
-    iyem = iye - 1;
+    lixm = lixe - 1;
+    liym = liye - 1;
 
-    // Define array sizes including ghost zones (or nxnom + 2)
-    gnx = nxnom + 2;
-    gny = nynom + 2;
-    gnxgny = gnx*gny;
+    // Define (total number of points) array sizes including ghost zones (or nxnom + 2)
+    tnx = nxnom + 2;
+    tny = nynom + 2;
+    tnxtny = tnx*tny;
 
-    // Allocate memory dynamically for these arrays
-    uold1D = malloc(gnxgny*sizeof(double*));
-    ucur1D = malloc(gnxgny*sizeof(double*));
-    uold   = malloc(gnx*sizeof(double*));
-    ucur   = malloc(gnx*sizeof(double*));
+    // Allocate memory for arrays
+    old1d = malloc(tnxtny*sizeof(double));
+    old   = malloc(tnx*sizeof(double*));  
 
-    for (i=0; i<=gnx; i++){
-        uold[i] = &uold1D[i*gny];
-        ucur[i] = &ucur1D[i*gny];
+    for(i=0; i<tnx; i++){      
+      old[i] = &old1d[i*tny];  
     }
-
-    // Set dx and dy
-    dx = 2.0/(nx-1.0);
-    dy = 2.0/(ny-1.0);
-
+    
     // Initialize uold
-    for (i=0; i<=ixe; i++){
-        for (j=0; j<=iye; j++){
-            uold[i][j] = 0.0;
+    for (i=0; i<=lixe; i++){
+        for (j=0; j<=liye; j++){
+            old[i][j] = (double)rank;
         }
     }
 
-    // Re-initialize uold
-    for (i=1; i<=nx; i++){
-        for (j=1; j<=ny; j++){
-            x = (double)(1 + nx - 2*i)/(double)(1 - nx); 
-            y = (double)(1 + ny - 2*j)/(double)(1 - ny);
-            if (i >= gixs && i <= gixe && j >= giys && j <= giye){
-                li = i - gixs + 1;   
-                lj = j - giys + 1;   
-                uold[li][lj] = x*x + y*y;      
-            }
-        }
-    }
-   
-    if(1){
-        printf("proc[%i] after exchange\n", procID);
+    if(0){
+        printf("proc[%i] \n", rank);
         printf("------------------------------------\n");
-        for (i=0; i<=ixe; i++){
-            for (j=0; j<=iye; j++){
-                printf("%1.1f\t", uold[i][j]);
+        for (i=0; i<=lixe; i++){
+            for (j=0; j<=liye; j++){
+                printf("%1.1f\t", old[i][j]);
             }
             printf("\n");
         }
         printf("------------------------------------\n");
     }
 
-    /* create user-defined types for parallel i/o */
-    size[0] = nx;
-    size[1] = ny;
-    subsize[0] = nxnom;
-    subsize[1] = nynom;
-    MPI_Cart_coords(comm_cart, myid, 2, start);
-
-    start[0] *= nxnom;
-    start[1] *= nynom;
-    MPI_Type_create_subarray(2, size, subsize, start, MPI_ORDER_C, MPI_DOUBLE, &file_type);
-    MPI_Type_commit(&file_type);
-
-    size[0] = nx;
-    size[1] = ny;
-    subsize[0] = nxnom;
-    subsize[1] = nynom;
-    start[0] = 1;
-    start[1] = 1;
-    MPI_Type_create_subarray(2, size, subsize, start, MPI_ORDER_C, MPI_DOUBLE, &mem_type);
-    MPI_Type_commit(&mem_type);
-
-    /* open file for MPI-2 parallel i/o */
-    MPI_File_open(MPI_COMM_WORLD, "final.dat", MPI_MODE_CREATE|MPI_MODE_WRONLY, MPI_INFO_NULL, &fh);
-    MPI_File_set_view(fh, 0, MPI_DOUBLE, file_type, "native", MPI_INFO_NULL);
-    MPI_File_write_all(fh, &new[0][0], 1, mem_type, &status);
-    MPI_File_close(&fh);
- 
+    // Sum over all array elements 
+    sum = 0.0;
+    for (i=1; i<=lixm; i++){
+        for (j=1; j<=liym; j++){
+            sum += old[i][j];
+        }
+    }
+   
+    // Return sum with MPI Reduce
+    sumreduce = sum;
+    MPI_Reduce(&sumreduce, &sum, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+   
+    // Let process 0 return the result
+    if (rank==0) printf("-- Integral = %g\n", sum);
+    if (rank==0) printf("-- All done. Exiting MPI environment.\n");
+    
     MPI_Finalize();
 }
