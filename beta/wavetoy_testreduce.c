@@ -12,9 +12,9 @@ int main(int argc, char *argv[]){
     int i, j, li, lj;
     int gixs, gixe, giys, giye;
     int lixs, lixe, liys, liye, lixm, liym;
-    int nx, ny, tnx, tny, tnxgny;
+    int nx, ny, tnx, tny, tnxtny;
     int nxprocs, nyprocs, nxnom, nynom, nprocs, rank;
-    double *uold1D, **uold;
+    double **old, *old1d;
     double x, y, sum, sumreduce;
 
     // Number of points in each direction (without ghost zones)
@@ -51,7 +51,7 @@ int main(int argc, char *argv[]){
         printf("   | Number of procs along x  = %i\n", nxprocs);
         printf("   | Number of procs along y  = %i\n", nyprocs);
     }
-
+    
     // global indices without ghost zones ('s' and 'e' refer to start and end)
     gixs = ((rank/nxprocs)*nxnom) + 1;  
     gixe = gixs + nxnom - 1;             
@@ -71,41 +71,29 @@ int main(int argc, char *argv[]){
     // Define (total number of points) array sizes including ghost zones (or nxnom + 2)
     tnx = nxnom + 2;
     tny = nynom + 2;
-    tnxgny = tnx*tny;
+    tnxtny = tnx*tny;
 
-    // Allocate memory dynamically for these arrays
-    uold1D = malloc(tnxgny*sizeof(double*));
-    uold   = malloc(tnx*sizeof(double*));
+    // Allocate memory for arrays
+    old1d = malloc(tnxtny*sizeof(double));
+    old   = malloc(tnx*sizeof(double*));  
 
-    for (i=0; i<=tnx; i++){
-        uold[i] = &uold1D[i*tny];
+    for(i=0; i<tnx; i++){      
+      old[i] = &old1d[i*tny];  
     }
-
-    // Initialize uold (we adopt vertex-centered approach)
+    
+    // Initialize uold
     for (i=0; i<=lixe; i++){
         for (j=0; j<=liye; j++){
-            uold[i][j] = 0.0;
+            old[i][j] = (double)rank;
         }
     }
 
-    for (i=1; i<=nx; i++){
-        for (j=1; j<=ny; j++){
-           x = (double)i;
-           y = (double)j;
-           if (i >= gixs && i <= gixe && j >= giys && j <= giye){  // identify which processor it belongs to
-               li = i - gixs + 1;   
-               lj = j - giys + 1;   
-               uold[li][lj] = x + y;                            // choose a function of your choice     
-           }
-        }
-    }
-  
     if(0){
         printf("proc[%i] \n", rank);
         printf("------------------------------------\n");
         for (i=0; i<=lixe; i++){
             for (j=0; j<=liye; j++){
-                printf("%1.1f\t", uold[i][j]);
+                printf("%1.1f\t", old[i][j]);
             }
             printf("\n");
         }
@@ -116,18 +104,17 @@ int main(int argc, char *argv[]){
     sum = 0.0;
     for (i=1; i<=lixm; i++){
         for (j=1; j<=liym; j++){
-            sum += uold[i][j];
+            sum += old[i][j];
         }
     }
-    
+   
     // Return sum with MPI Reduce
     sumreduce = sum;
     MPI_Reduce(&sumreduce, &sum, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
-    
-    if (rank==0){
-        printf("-- Integral = %g\n", sum);
-    }
    
-    if (rank ==0) printf("-- All done. Exiting MPI environment.\n");
+    // Let process 0 return the result
+    if (rank==0) printf("-- Integral = %g\n", sum);
+    if (rank==0) printf("-- All done. Exiting MPI environment.\n");
+    
     MPI_Finalize();
 }
